@@ -2093,10 +2093,10 @@ else:
         c1, c2 = st.columns([1.35, 1])
         with c1:
             st.subheader("Mapa de clusters")
-            mt = st.radio("Tipo de mapa", ["Interativo leve", "Estático"], horizontal=True, key="cluster_map_type")
+            mt = st.radio("Tipo de mapa", ["Interativo", "Estático"], horizontal=True, key="cluster_map_type")
             if gdf_concelhos is None:
                 st.warning("Falta o ficheiro CAOP GeoPackage.")
-            elif mt == "Interativo leve" and gdf_concelhos_wgs is not None:
+            elif mt == "Interativo" and gdf_concelhos_wgs is not None:
                 cluster_pydeck_map(gdf_concelhos_wgs, cl)
             else:
                 cluster_static(gdf_concelhos, cl)
