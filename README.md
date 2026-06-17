@@ -1,21 +1,78 @@
 # Dashboard de Caracterização Energética Municipal
 
-Este repositório contém uma aplicação em Streamlit desenvolvida no âmbito de um projeto de análise de dados sobre o consumo elétrico em Portugal, à escala municipal, entre 2021 e 2024.
+Aplicação desenvolvida em **Streamlit** no âmbito do projeto **“Mapeamento espaço-temporal do consumo elétrico e análise dos seus determinantes territoriais: estudo aplicado a concelhos de Portugal (2021–2024)”**.
 
-A plataforma funciona como proposta de deployment dos resultados obtidos nas fases de análise exploratória e clustering, permitindo explorar indicadores energéticos, demográficos, climáticos e territoriais de forma interativa.
+A plataforma permite explorar dados de consumo elétrico, indicadores territoriais e resultados de clustering energético ao nível municipal.
 
-## Funcionalidades principais
+## Funcionalidades
 
-- Visualização exploratória por distrito e concelho
-- Mapas territoriais de consumo, CPEs, UPACs, BT e MAT
-- Análise dos quatro distritos estudados: Faro, Setúbal, Aveiro e Castelo Branco
-- Narrativas territoriais e soluções operacionais para a E-Redes
-- Clustering energético dos concelhos
-- Mapa interativo de clusters
-- Ranking interativo por cluster e variável
+* Análise exploratória por distrito e concelho;
+* Visualização de consumo elétrico, CPEs e UPACs;
+* Mapas interativos;
+* Comparação com variáveis climáticas;
+* Clustering energético dos concelhos;
+* Rankings e análises territoriais.
 
-## Como correr localmente
+## Estrutura do repositório
+
+```text
+.
+├── .streamlit/
+│   └── config.toml
+├── data/
+│   ├── Continente_CAOP2025.gpkg
+│   ├── concelhos_clusters_portugal.csv
+│   ├── dataset_final_unificado.xlsx
+│   └── upacs_tratado.xlsx
+├── .gitattributes
+├── README.md
+├── app.py
+└── requirements.txt
+```
+
+## Principais ficheiros
+
+* **app.py** – aplicação principal.
+* **requirements.txt** – dependências do projeto.
+* **config.toml** – configurações do Streamlit.
+* **dataset_final_unificado.xlsx** – dataset principal.
+* **upacs_tratado.xlsx** – dados de UPACs.
+* **concelhos_clusters_portugal.csv** – classificação dos clusters.
+* **Continente_CAOP2025.gpkg** – informação geográfica para os mapas.
+
+## Executar localmente
+
+Instalar dependências:
 
 ```bash
 python -m pip install -r requirements.txt
+```
+
+Executar a aplicação:
+
+```bash
 python -m streamlit run app.py
+```
+
+A aplicação ficará disponível em:
+
+```text
+http://localhost:8501
+```
+
+## Deployment
+
+Após alterações ao projeto:
+
+```bash
+git add .
+git commit -m "Update dashboard"
+git push
+```
+
+A aplicação pode ser publicada através do **Streamlit Community Cloud**.
+
+## Nota
+
+O repositório utiliza **Git LFS** para gerir ficheiros de dados e ficheiros geográficos de maior dimensão.
+
