@@ -61,16 +61,7 @@ http://localhost:8501
 ```
 
 ## Deployment
-
-Após alterações ao projeto:
-
-```bash
-git add .
-git commit -m "Update dashboard"
-git push
-```
-
-A aplicação pode ser publicada através do **Streamlit Community Cloud**.
+A aplicação pode ser, e neste momento está, publicada através do **Streamlit Community Cloud**.
 
 ## Nota
 
