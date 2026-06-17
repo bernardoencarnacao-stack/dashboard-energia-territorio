@@ -1665,11 +1665,6 @@ elif sec == "2. Os 4 Distritos Estudados":
 
     df_sec2, using_upacs_sec2 = data_for_var(var, df, upacs_df)
     de = df_sec2[df_sec2["Distrito"].isin(DISTRITOS_ESTUDADOS)].copy()
-    if var == "Consumo_per_capita":
-        st.info(
-            "Nesta versão, os outliers não são isolados: o mapa mostra a escala original completa, "
-            "tal como nas restantes variáveis."
-        )
 
     if gdf_distritos is None or gdf_concelhos is None:
         st.warning("Falta o ficheiro CAOP GeoPackage.")
