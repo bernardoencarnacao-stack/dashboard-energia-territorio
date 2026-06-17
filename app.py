@@ -4,9 +4,18 @@ import numpy as np
 import geopandas as gpd
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
+import matplotlib.dates as mdates
 import seaborn as sns
+import json
 import unicodedata
 from pathlib import Path
+
+try:
+    import plotly.express as px
+    HAS_PLOTLY = True
+except Exception:
+    px = None
+    HAS_PLOTLY = False
 
 st.set_page_config(page_title="Dashboard Energético Municipal", page_icon="⚡", layout="wide")
 
@@ -122,6 +131,7 @@ DATA = Path("data")
 DATASET = DATA / "dataset_final_unificado.xlsx"
 CLUSTERS_CSV = DATA / "concelhos_clusters_portugal.csv"
 CLUSTERS_XLSX = DATA / "concelhos_clusters_portugal.xlsx"
+UPACS_FILE = DATA / "upacs_tratado.xlsx"
 CAOP = DATA / "Continente_CAOP2025.gpkg"
 
 DISTRITOS_ESTUDADOS = ["Faro", "Setúbal", "Aveiro", "Castelo Branco"]
@@ -135,11 +145,18 @@ CLUSTER_LABELS = {
     5: "Industrial Extremo"
 }
 CLUSTER_DESCRICOES = {
-    1: "Baixa densidade, consumo moderado e fraca penetração de produção solar distribuída.",
-    2: "Perfil equilibrado com consumo doméstico dominante e adoção crescente de UPAC.",
-    3: "Indústria pesada com consumo em MAT muito acima da média.",
-    4: "Concelhos metropolitanos densos com forte peso do consumo urbano/residencial.",
-    5: "Consumo extremo singular dominado por indústria pesada, logística e petroquímica."
+    1: "Concelhos de baixa densidade, mais rurais/interiores, com consumo absoluto moderado e forte efeito de escala nas métricas relativas.",
+    2: "Concelhos com perfil energético equilibrado, consumo doméstico e urbano relevante, sem valores extremos de MAT ou per capita.",
+    3: "Polos industriais onde a energia em Muito Alta Tensão e o consumo per capita se destacam face à dimensão populacional.",
+    4: "Concelhos metropolitanos densos, com muitos residentes, muitos CPEs e forte peso do consumo urbano/residencial em BT.",
+    5: "Caso singular extremo, dominado por indústria pesada, porto, logística e petroquímica, com valores muito acima dos restantes concelhos."
+}
+CLUSTER_DETERMINANTES = {
+    1: "Determinantes principais: baixa densidade populacional, dispersão territorial, CPEs relativos elevados por efeito de escala e menor intensidade industrial/MAT.",
+    2: "Determinantes principais: consumo per capita intermédio, predominância da BT, estrutura municipal equilibrada e adoção de UPAC sem valores extremos.",
+    3: "Determinantes principais: Energia_MAT_per_capita muito elevada, consumo per capita alto e presença de grandes consumidores industriais.",
+    4: "Determinantes principais: densidade populacional, CPEs totais elevados, consumo urbano em BT e peso residencial/metropolitano.",
+    5: "Determinantes principais: Energia_Ativa_Total e Energia_MAT_per_capita extremas, grande atividade industrial/portuária e forte afastamento estatístico dos restantes concelhos."
 }
 CLUSTER_CORES = {1: "#1f77b4", 2: "#2ca02c", 3: "#9467bd", 4: "#e377c2", 5: "#bcbd22"}
 
@@ -148,6 +165,8 @@ VAR_GROUPS = {
         "Energia_Ativa_Total": "Energia Ativa Total",
         "Energia_BT": "Energia BT",
         "Energia_MAT": "Energia MAT",
+        "CPEs_Total": "CPEs Total",
+        "UPACs_Total": "UPACs Total",
         "Ligacoes_Total": "Ligações à rede",
     },
     "Variáveis relativas": {
@@ -156,8 +175,14 @@ VAR_GROUPS = {
         "Energia_MAT_per_capita": "Energia MAT per capita",
         "CPEs_por_1000_hab": "CPEs por 1000 habitantes",
         "UPACs_por_1000_hab": "UPACs por 1000 habitantes",
+    },
+    "Proporções": {
         "Prop_energia_BT": "Proporção Energia BT",
         "Prop_energia_MAT": "Proporção Energia MAT",
+        "Prop_CPEs_BT": "Proporção CPEs BT",
+        "Prop_CPEs_MAT": "Proporção CPEs MAT",
+        "Prop_UPACs_BT": "Proporção UPACs BT",
+        "Prop_UPACs_MT": "Proporção UPACs MT",
         "Prop_Domestico": "Proporção CPEs domésticos",
     },
     "Variáveis climáticas": {
@@ -179,8 +204,26 @@ MAP_CM = {
     "Energia_BT_per_capita": "Blues", "Energia_MAT_per_capita": "RdPu",
     "CPEs_Total": "Greens", "UPACs_Total": "Purples", "Energia_BT": "Blues", "Energia_MAT": "RdPu",
 }
-SUM_VARS = {"Energia_Ativa_Total", "Energia_BT", "Energia_MAT", "CPEs_Total", "UPACs_Total", "Ligacoes_Total"}
+SUM_VARS = {"Energia_Ativa_Total", "Energia_BT", "Energia_MAT", "Ligacoes_Total"}
 CLIMA_VARS = {"Temp_Media_Mensal", "Precipitacao_Total_Mensal", "Radiacao_Global_Total_Mensal", "Humidade_Relativa_Media_Mensal"}
+QUALIDADE_VARS = {"SAIFI_AT", "SAIDI_AT", "MAIFI_AT", "SAIFI_MT", "SAIDI_MT", "MAIFI_MT", "SAIFI_BT", "SAIDI_BT"}
+
+CPE_VARS = {
+    "CPEs_Total", "CPEs_BT", "CPEs_MAT", "CPEs_Doméstico", "CPEs_Domestico",
+    "CPEs_Não_Doméstico", "CPEs_Nao_Domestico", "CPEs_Iluminacao_Publica",
+    "CPEs_Outros", "CPEs_por_1000_hab", "Prop_Domestico", "Prop_CPEs_BT", "Prop_CPEs_MAT"
+}
+UPAC_VARS = {
+    "UPACs_Total", "UPACs_BT", "UPACs_MT", "UPACs_por_1000_hab", "UPAC_por_1000_CPEs",
+    "Prop_UPACs_BT", "Prop_UPACs_MT", "Potência Total Instalada UPAC (kW)"
+}
+ABS_STOCK_VARS = {
+    "CPEs_Total", "CPEs_BT", "CPEs_MAT", "CPEs_Doméstico", "CPEs_Domestico",
+    "CPEs_Não_Doméstico", "CPEs_Nao_Domestico", "CPEs_Iluminacao_Publica", "CPEs_Outros",
+    "UPACs_Total", "UPACs_BT", "UPACs_MT", "Potência Total Instalada UPAC (kW)"
+}
+REL_STOCK_VARS = (CPE_VARS | UPAC_VARS) - ABS_STOCK_VARS
+TEMPORAL_COLS = {"Data", "Data_Periodo", "Data_Trimestre", "Mês", "Mes", "Ano", "Trimestre_Num"}
 
 
 def norm_name(x):
@@ -253,6 +296,93 @@ def load_df(path):
 
 
 @st.cache_data(show_spinner=False)
+def load_upacs(path, df_ref):
+    """Carrega o ficheiro trimestral de UPACs.
+
+    Este ficheiro evita a visualização em "escadinha" que aparece quando se usa
+    o dataset unificado mensal, onde os valores trimestrais foram replicados por 3 meses.
+    """
+    up = read_table(path)
+    if up is None:
+        return None
+
+    up = up.copy()
+    up.columns = [str(c).strip() for c in up.columns]
+    rename = {
+        "Código Distrito": "Codigo_Distrito",
+        "Código Concelho": "Codigo_Concelho",
+        "Codigo Distrito": "Codigo_Distrito",
+        "Codigo Concelho": "Codigo_Concelho",
+    }
+    up = up.rename(columns={k: v for k, v in rename.items() if k in up.columns})
+
+    if "Distrito" not in up.columns or "Concelho" not in up.columns:
+        return None
+
+    up["Distrito_norm"] = up["Distrito"].apply(norm_name)
+    up["Concelho_norm"] = up["Concelho"].apply(norm_name)
+
+    if "Trimestre" in up.columns:
+        tri = up["Trimestre"].astype(str).str.upper().str.replace(" ", "", regex=False).str.replace("º", "", regex=False)
+        ano = tri.str.extract(r"(20\d{2})", expand=False)
+        q1 = tri.str.extract(r"[TQ]([1-4])", expand=False)
+        q2 = tri.str.extract(r"([1-4])[TQ]", expand=False)
+        q = q1.fillna(q2)
+        up["Ano"] = pd.to_numeric(up.get("Ano", ano), errors="coerce").fillna(pd.to_numeric(ano, errors="coerce")).astype("Int64")
+        up["Trimestre_Num"] = pd.to_numeric(q, errors="coerce").astype("Int64")
+    else:
+        if "Ano" in up.columns:
+            up["Ano"] = pd.to_numeric(up["Ano"], errors="coerce").astype("Int64")
+        if "Trimestre_Num" not in up.columns:
+            up["Trimestre_Num"] = pd.NA
+
+    up["Periodo_Label"] = up["Ano"].astype("Int64").astype(str) + "T" + up["Trimestre_Num"].astype("Int64").astype(str)
+    up.loc[up["Ano"].isna() | up["Trimestre_Num"].isna(), "Periodo_Label"] = pd.NA
+    up["Data_Periodo"] = pd.NaT
+    ok = up["Ano"].notna() & up["Trimestre_Num"].notna()
+    if ok.any():
+        up.loc[ok, "Data_Periodo"] = pd.PeriodIndex(
+            up.loc[ok, "Ano"].astype(int).astype(str) + "Q" + up.loc[ok, "Trimestre_Num"].astype(int).astype(str),
+            freq="Q"
+        ).to_timestamp()
+    up["Data"] = up["Data_Periodo"]
+
+    # Junta população anual do dataset unificado para calcular UPACs por 1000 habitantes.
+    if "UPACs_por_1000_hab" not in up.columns and "UPACs_Total" in up.columns and df_ref is not None and "Populacao_Residente" in df_ref.columns:
+        pop_cols = ["Ano", "Distrito_norm", "Concelho_norm", "Populacao_Residente"]
+        pop = df_ref[pop_cols].dropna(subset=["Ano", "Populacao_Residente"]).drop_duplicates(subset=["Ano", "Distrito_norm", "Concelho_norm"])
+        up = up.merge(pop, on=["Ano", "Distrito_norm", "Concelho_norm"], how="left")
+        up["UPACs_por_1000_hab"] = up["UPACs_Total"] / up["Populacao_Residente"] * 1000
+
+    # Garante colunas numéricas para variáveis UPAC.
+    for c in UPAC_VARS:
+        if c in up.columns:
+            up[c] = pd.to_numeric(up[c], errors="coerce")
+
+    return up
+
+
+def add_quarter_columns(d):
+    d = d.copy()
+    if "Data" in d.columns and not pd.api.types.is_datetime64_any_dtype(d["Data"]):
+        d["Data"] = pd.to_datetime(d["Data"], errors="coerce")
+    if "Data" in d.columns:
+        d["Data_Trimestre"] = d["Data"].dt.to_period("Q").dt.to_timestamp()
+        d["Trimestre_Num"] = d["Data"].dt.quarter.astype("Int64")
+        d["Periodo_Label"] = d["Data"].dt.to_period("Q").astype(str).str.replace("Q", "T", regex=False)
+    return d
+
+
+def data_for_var(var, df_main, df_upacs):
+    if is_upac_var(var) and df_upacs is not None and var in df_upacs.columns:
+        return df_upacs.copy(), True
+    d = df_main.copy()
+    if is_cpe_var(var):
+        d = add_quarter_columns(d)
+    return d, False
+
+
+@st.cache_data(show_spinner=False)
 def load_clusters(csv_path, xlsx_path):
     cl = read_table(csv_path) if Path(csv_path).exists() else read_table(xlsx_path)
     if cl is None:
@@ -281,6 +411,30 @@ def load_geo(path):
     return gd, gc, gc_wgs
 
 
+def is_cpe_var(v):
+    return v in CPE_VARS or v.startswith("CPEs_") or v.startswith("Prop_CPEs") or v == "Prop_Domestico"
+
+
+def is_upac_var(v):
+    return v in UPAC_VARS or v.startswith("UPAC") or v.startswith("Prop_UPAC") or "UPAC" in v
+
+
+def is_stock_var(v):
+    return is_cpe_var(v) or is_upac_var(v)
+
+
+def is_quality_var(v):
+    return v in QUALIDADE_VARS
+
+
+def is_climate_var(v):
+    return v in CLIMA_VARS
+
+
+def is_abs_stock_var(v):
+    return v in ABS_STOCK_VARS
+
+
 def agg_rule(v):
     if v in SUM_VARS:
         return "sum"
@@ -289,7 +443,34 @@ def agg_rule(v):
     return "mean"
 
 
+def _period_col_for_agg(df):
+    for c in ["Data_Periodo", "Data_Trimestre", "Data"]:
+        if c in df.columns:
+            return c
+    return None
+
+
 def agg(df, keys, var):
+    keys = list(keys)
+    if df is None or df.empty or var not in df.columns:
+        return pd.DataFrame(columns=keys + [var])
+
+    # CPEs e UPACs são variáveis de stock/contagem replicadas no tempo.
+    # Para evitar valores inflacionados, quando não há dimensão temporal explícita
+    # calcula-se primeiro o valor por período e depois a média dos períodos.
+    if is_stock_var(var):
+        temporal_in_keys = any(k in TEMPORAL_COLS for k in keys)
+        if is_abs_stock_var(var):
+            if temporal_in_keys:
+                return df.groupby(keys, as_index=False)[var].sum(min_count=1)
+            pcol = _period_col_for_agg(df)
+            if pcol and pcol not in keys:
+                tmp = df.groupby(keys + [pcol], as_index=False)[var].sum(min_count=1)
+                return tmp.groupby(keys, as_index=False)[var].mean()
+            return df.groupby(keys, as_index=False)[var].mean()
+        else:
+            return df.groupby(keys, as_index=False)[var].mean()
+
     return df.groupby(keys, as_index=False)[var].agg(agg_rule(var))
 
 
@@ -306,15 +487,23 @@ def scale_var(s, var):
     if var in ["Consumo_per_capita", "Energia_BT_per_capita", "Energia_MAT_per_capita"]:
         return (s / 1000, "MWh/habitante") if mx >= 1000 else (s, "kWh/habitante")
     if var == "CPEs_por_1000_hab":
-        return s, "CPEs por 1000 habitantes"
+        return s, "por 1000 hab."
     if var == "UPACs_por_1000_hab":
-        return s, "UPACs por 1000 habitantes"
-    if var in ["CPEs_Total", "UPACs_Total"]:
+        return s, "por 1000 hab."
+    if var in ["CPEs_Total", "CPEs_BT", "CPEs_MAT", "UPACs_Total", "UPACs_BT", "UPACs_MT"]:
         if mx >= 1_000_000:
             return s / 1_000_000, "milhões"
         if mx >= 1_000:
             return s / 1_000, "milhares"
         return s, "n.º"
+    if var == "Potência Total Instalada UPAC (kW)":
+        if mx >= 1_000_000:
+            return s / 1_000_000, "GW"
+        if mx >= 1_000:
+            return s / 1_000, "MW"
+        return s, "kW"
+    if var == "UPAC_por_1000_CPEs":
+        return s, "por 1000 CPEs"
     if var.startswith("Prop_"):
         return s * 100, "%"
     if var == "Temp_Media_Mensal":
@@ -326,6 +515,24 @@ def scale_var(s, var):
     if var == "Humidade_Relativa_Media_Mensal":
         return s, "%"
     return s, ""
+
+
+def display_label(var, unit=""):
+    if var == "CPEs_por_1000_hab":
+        return "Nº de CPEs por 1000 habitantes"
+    if var == "UPACs_por_1000_hab":
+        return "Nº de UPACs por 1000 habitantes"
+    return f"{label_var(var)} ({unit})" if unit else label_var(var)
+
+
+def climate_color(var):
+    cores = {
+        "Humidade_Relativa_Media_Mensal": "green",
+        "Precipitacao_Total_Mensal": "cyan",
+        "Radiacao_Global_Total_Mensal": "gold",
+        "Temp_Media_Mensal": "tab:red",
+    }
+    return cores.get(var, "tab:red")
 
 
 def add_labels(ax, gdf, col, fs=5):
@@ -369,9 +576,20 @@ def choose_var(df, key):
     return selected
 
 
-def choose_years(df, key):
+def choose_years(df, key, var=None):
     anos = sorted([int(x) for x in df["Ano"].dropna().unique()]) if "Ano" in df.columns else []
+    if var and (is_cpe_var(var) or is_upac_var(var)):
+        anos = [a for a in anos if a >= 2022]
     return st.multiselect("Ano", anos, default=anos, key=key)
+
+
+def default_districts(options):
+    opts = list(options)
+    return [d for d in DISTRITOS_ESTUDADOS if d in opts]
+
+
+def empty_selection_message(kind="distrito"):
+    st.info(f"Seleciona pelo menos um {kind} para gerar a visualização.")
 
 
 def remove_pc_outliers(df):
@@ -407,33 +625,231 @@ def pc_limits(scaled_series):
 
     return float(vmin), float(vmax)
 
+
+
+def format_time_axis(ax):
+    """Evita labels temporais encavalitadas no eixo X."""
+    try:
+        ax.xaxis.set_major_locator(mdates.AutoDateLocator(minticks=4, maxticks=8))
+        ax.xaxis.set_major_formatter(mdates.DateFormatter("%m-%Y"))
+    except Exception:
+        pass
+    ax.tick_params(axis="x", labelrotation=45, labelsize=7)
+
+
+def temporal_key_for_plot(df, var, saz=False):
+    if saz:
+        if is_upac_var(var) and "Trimestre_Num" in df.columns:
+            return "Trimestre_Num", "Trimestre"
+        return "Mês", "Mês"
+    if is_upac_var(var) and "Data_Periodo" in df.columns:
+        return "Data_Periodo", "Trimestre"
+    if is_cpe_var(var) and "Data_Trimestre" in df.columns:
+        return "Data_Trimestre", "Trimestre"
+    return "Data", "Data"
+
 # ============================================================
 # PLOTS
 # ============================================================
 
+def climate_axis_label(var):
+    _, unit = scale_var(pd.Series([1.0]), var)
+    return f"{label_var(var)} ({unit})" if unit else label_var(var)
+
+
+def climate_vs_consumption_district(df, climate_var, distrito, saz=False):
+    d = df[df["Distrito"] == distrito].copy()
+    if d.empty:
+        st.info("Sem dados para o distrito selecionado."); return
+    x = "Mês" if saz else "Data"
+    if x not in d.columns:
+        st.info("Não existe dimensão temporal adequada para esta comparação."); return
+
+    cons = agg(d, [x, "Distrito"], "Energia_Ativa_Total")
+    clim = agg(d, [x, "Distrito"], climate_var)
+    t = cons.merge(clim, on=[x, "Distrito"], how="inner")
+    if t.empty:
+        st.info("Sem dados suficientes para cruzar consumo e clima."); return
+
+    t["Consumo"], cons_unit = scale_var(t["Energia_Ativa_Total"], "Energia_Ativa_Total")
+    t["Clima"], clim_unit = scale_var(t[climate_var], climate_var)
+
+    fig, ax1 = plt.subplots(figsize=(9.2, 3.9))
+    ax2 = ax1.twinx()
+    ax1.plot(t[x], t["Consumo"], marker="o", linewidth=1.7, label="Consumo")
+    ax2.plot(t[x], t["Clima"], linestyle="--", linewidth=1.5, color=climate_color(climate_var), label=label_var(climate_var))
+
+    titulo = "Sazonalidade" if saz else "Evolução temporal"
+    ax1.set_title(f"{titulo}: Energia Ativa Total vs {label_var(climate_var)} — {distrito}", fontsize=11)
+    ax1.set_ylabel(f"Energia Ativa Total ({cons_unit})")
+    ax2.set_ylabel(f"{label_var(climate_var)} ({clim_unit})" if clim_unit else label_var(climate_var))
+    ax1.set_xlabel("Mês" if saz else "Data")
+    if saz:
+        ax1.set_xticks(range(1, 13)); ax1.set_xticklabels([mes_labels()[m] for m in range(1, 13)])
+    else:
+        format_time_axis(ax1)
+    ax1.grid(True, linestyle="--", alpha=.3)
+    lines1, labels1 = ax1.get_legend_handles_labels()
+    lines2, labels2 = ax2.get_legend_handles_labels()
+    ax1.legend(lines1 + lines2, labels1 + labels2, loc="upper left", fontsize=8)
+    fig.subplots_adjust(bottom=0.22)
+    showfig(fig)
+
+
+def climate_vs_consumption_single_county(df, climate_var, concelho, saz=False):
+    d = df[df["Concelho"] == concelho].copy()
+    if d.empty:
+        st.info("Sem dados para o concelho selecionado."); return
+    distrito = d["Distrito"].dropna().iloc[0] if d["Distrito"].notna().any() else "Distrito"
+    x = "Mês" if saz else "Data"
+    cons = agg(d, [x, "Concelho"], "Energia_Ativa_Total")
+    clim = agg(d, [x, "Distrito"], climate_var).drop(columns=["Distrito"], errors="ignore")
+    t = cons.merge(clim, on=x, how="inner")
+    if t.empty:
+        st.info("Sem dados suficientes para cruzar consumo e clima."); return
+
+    t["Consumo"], cons_unit = scale_var(t["Energia_Ativa_Total"], "Energia_Ativa_Total")
+    t["Clima"], clim_unit = scale_var(t[climate_var], climate_var)
+
+    fig, ax1 = plt.subplots(figsize=(9.2, 3.9))
+    ax2 = ax1.twinx()
+    ax1.plot(t[x], t["Consumo"], marker="o", linewidth=1.7, label=f"Consumo — {concelho}")
+    ax2.plot(t[x], t["Clima"], linestyle="--", linewidth=1.5, color=climate_color(climate_var), label=f"{label_var(climate_var)} — {distrito}")
+    titulo = "Sazonalidade" if saz else "Evolução temporal"
+    ax1.set_title(f"{titulo}: Energia Ativa Total vs {label_var(climate_var)} — {concelho}", fontsize=11)
+    ax1.set_ylabel(f"Energia Ativa Total ({cons_unit})")
+    ax2.set_ylabel(f"{label_var(climate_var)} ({clim_unit})" if clim_unit else label_var(climate_var))
+    ax1.set_xlabel("Mês" if saz else "Data")
+    if saz:
+        ax1.set_xticks(range(1, 13)); ax1.set_xticklabels([mes_labels()[m] for m in range(1, 13)])
+    else:
+        format_time_axis(ax1)
+    ax1.grid(True, linestyle="--", alpha=.3)
+    lines1, labels1 = ax1.get_legend_handles_labels()
+    lines2, labels2 = ax2.get_legend_handles_labels()
+    ax1.legend(lines1 + lines2, labels1 + labels2, loc="upper left", fontsize=8)
+    fig.subplots_adjust(bottom=0.22)
+    showfig(fig)
+
+
+def climate_vs_consumption_counties(df, climate_var, distrito, saz=False):
+    d = df[df["Distrito"] == distrito].copy()
+    if d.empty:
+        st.info("Sem dados para o distrito selecionado."); return
+    x = "Mês" if saz else "Data"
+    cons = agg(d, [x, "Concelho"], "Energia_Ativa_Total")
+    clim = agg(d, [x, "Distrito"], climate_var).drop(columns=["Distrito"], errors="ignore")
+    if cons.empty or clim.empty:
+        st.info("Sem dados suficientes para cruzar consumo e clima."); return
+    cons["Consumo"], cons_unit = scale_var(cons["Energia_Ativa_Total"], "Energia_Ativa_Total")
+    clim["Clima"], clim_unit = scale_var(clim[climate_var], climate_var)
+
+    fig, ax1 = plt.subplots(figsize=(9.6, 4.2))
+    ax2 = ax1.twinx()
+    concelhos = sorted(cons["Concelho"].dropna().unique())
+    palette = discrete_palette(concelhos)
+    for conc in concelhos:
+        cc = cons[cons["Concelho"] == conc]
+        ax1.plot(cc[x], cc["Consumo"], marker="o", markersize=3.2, linewidth=1.25, label=conc, color=palette.get(conc))
+    ax2.plot(clim[x], clim["Clima"], linestyle="--", linewidth=1.7, color=climate_color(climate_var), label=label_var(climate_var))
+
+    titulo = "Sazonalidade" if saz else "Evolução temporal"
+    ax1.set_title(f"{titulo}: concelhos vs {label_var(climate_var)} — {distrito}", fontsize=11)
+    ax1.set_ylabel(f"Energia Ativa Total ({cons_unit})")
+    ax2.set_ylabel(f"{label_var(climate_var)} ({clim_unit})" if clim_unit else label_var(climate_var))
+    ax1.set_xlabel("Mês" if saz else "Data")
+    if saz:
+        ax1.set_xticks(range(1, 13)); ax1.set_xticklabels([mes_labels()[m] for m in range(1, 13)])
+    else:
+        format_time_axis(ax1)
+    ax1.grid(True, linestyle="--", alpha=.3)
+    lines1, labels1 = ax1.get_legend_handles_labels()
+    lines2, labels2 = ax2.get_legend_handles_labels()
+    ax1.legend(lines1 + lines2, labels1 + labels2, bbox_to_anchor=(1.08, 1), loc="upper left", fontsize=7, borderaxespad=0)
+    fig.subplots_adjust(right=0.73, bottom=0.22)
+    showfig(fig)
+
+
+def climate_sensitivity_ranking(df, climate_var, level="Distrito"):
+    """Ranking de sensibilidade: correlação absoluta entre consumo e variável climática."""
+    if df.empty:
+        st.info("Sem dados para os filtros selecionados."); return
+    keys = ["Data", level] if level == "Distrito" else ["Data", "Distrito", "Concelho"]
+    cons = agg(df, keys, "Energia_Ativa_Total")
+    clim_keys = ["Data", "Distrito"] if level != "Distrito" else ["Data", "Distrito"]
+    clim = agg(df, clim_keys, climate_var)
+    if level == "Distrito":
+        t = cons.merge(clim, on=["Data", "Distrito"], how="inner")
+        group_cols = ["Distrito"]
+    else:
+        t = cons.merge(clim, on=["Data", "Distrito"], how="inner")
+        group_cols = ["Distrito", "Concelho"]
+    if t.empty:
+        st.info("Sem dados suficientes para calcular sensibilidade."); return
+
+    rows = []
+    for name, g in t.groupby(group_cols):
+        if len(g.dropna(subset=["Energia_Ativa_Total", climate_var])) >= 3:
+            corr = g["Energia_Ativa_Total"].corr(g[climate_var])
+            if pd.notna(corr):
+                if level == "Distrito":
+                    distrito = name if isinstance(name, str) else name[0]
+                    concelho = None
+                else:
+                    distrito, concelho = name
+                rows.append({"Distrito": distrito, "Concelho": concelho, "Correlação": corr, "Sensibilidade": abs(corr)})
+    rank = pd.DataFrame(rows)
+    if rank.empty:
+        st.info("Não foi possível calcular correlações com os dados filtrados."); return
+    rank = rank.sort_values("Sensibilidade", ascending=False)
+    label_col = "Distrito" if level == "Distrito" else "Concelho"
+
+    fig, ax = plt.subplots(figsize=(7.8, max(3.2, .28 * len(rank))))
+    sns.barplot(data=rank, x="Sensibilidade", y=label_col, ax=ax, color="#9b5de5")
+    ax.set_title(f"Ranking de sensibilidade ao clima — {label_var(climate_var)}", fontsize=10.5)
+    ax.set_xlabel("|correlação consumo–clima|  (0 = fraca; 1 = forte)")
+    ax.set_ylabel("")
+    ax.grid(True, axis="x", linestyle="--", alpha=.3)
+    showfig(fig)
+    with st.expander("Ver tabela com correlação assinada"):
+        cols = ["Distrito", "Correlação", "Sensibilidade"] if level == "Distrito" else ["Distrito", "Concelho", "Correlação", "Sensibilidade"]
+        st.dataframe(rank[cols].round(3), use_container_width=True)
+
+
 def line_district(df, var, saz=False):
-    keys = ["Mês", "Distrito"] if saz else ["Data", "Distrito"]
+    x, xlabel = temporal_key_for_plot(df, var, saz=saz)
+    if x not in df.columns:
+        st.info("Não existe dimensão temporal adequada para esta variável."); return
+    keys = [x, "Distrito"]
     t = agg(df, keys, var)
+    if t.empty:
+        st.info("Sem dados para os filtros selecionados."); return
     t["Valor"], unit = scale_var(t[var], var)
     distritos = sorted(t["Distrito"].dropna().unique())
     palette = discrete_palette(distritos)
 
     fig, ax = plt.subplots(figsize=(8.8, 3.8))
-    x = "Mês" if saz else "Data"
     sns.lineplot(data=t, x=x, y="Valor", hue="Distrito", palette=palette, marker="o", markersize=4, linewidth=1.6, ax=ax)
-    ax.set_title(("Sazonalidade média" if saz else "Evolução temporal") + f" — {label_var(var)}", fontsize=11)
-    ax.set_xlabel("Mês" if saz else "Data")
+    titulo = "Sazonalidade média" if saz else ("Evolução trimestral" if xlabel == "Trimestre" else "Evolução temporal")
+    ax.set_title(titulo + f" — {label_var(var)}", fontsize=11)
+    ax.set_xlabel(xlabel)
     ax.set_ylabel(f"{label_var(var)} ({unit})" if unit else label_var(var))
-    if saz:
+    if saz and x == "Mês":
         ax.set_xticks(range(1, 13)); ax.set_xticklabels([mes_labels()[m] for m in range(1, 13)])
+    elif saz and x == "Trimestre_Num":
+        ax.set_xticks([1, 2, 3, 4]); ax.set_xticklabels(["T1", "T2", "T3", "T4"])
+    elif not saz:
+        format_time_axis(ax)
     ax.grid(True, linestyle="--", alpha=.3)
     ax.legend(title="Distrito", fontsize=8, bbox_to_anchor=(1.02, 1), loc="upper left", borderaxespad=0)
-    fig.subplots_adjust(right=0.78)
+    fig.subplots_adjust(right=0.78, bottom=0.22)
     showfig(fig)
 
 
 def bar_district(df, var):
     t = agg(df, ["Distrito"], var)
+    if t.empty:
+        st.info("Sem dados para os filtros selecionados."); return
     t["Valor"], unit = scale_var(t[var], var)
     t = t.sort_values("Valor", ascending=False)
     fig, ax = plt.subplots(figsize=(7.5, 3.6))
@@ -444,23 +860,37 @@ def bar_district(df, var):
 
 
 def line_single_county(df, var, concelho, saz=False):
-    t = agg(df[df["Concelho"] == concelho], ["Mês" if saz else "Data"], var)
+    x, xlabel = temporal_key_for_plot(df, var, saz=saz)
+    if x not in df.columns:
+        st.info("Não existe dimensão temporal adequada para esta variável."); return
+    t = agg(df[df["Concelho"] == concelho], [x], var)
+    if t.empty:
+        st.info("Sem dados para os filtros selecionados."); return
     t["Valor"], unit = scale_var(t[var], var)
     fig, ax = plt.subplots(figsize=(8.6, 3.8))
-    x = "Mês" if saz else "Data"
     sns.lineplot(data=t, x=x, y="Valor", marker="o", markersize=4, linewidth=1.6, ax=ax)
-    ax.set_title(("Sazonalidade média" if saz else "Evolução temporal") + f" — {label_var(var)} | {concelho}", fontsize=11)
-    ax.set_xlabel("Mês" if saz else "Data")
+    titulo = "Sazonalidade média" if saz else ("Evolução trimestral" if xlabel == "Trimestre" else "Evolução temporal")
+    ax.set_title(titulo + f" — {label_var(var)} | {concelho}", fontsize=11)
+    ax.set_xlabel(xlabel)
     ax.set_ylabel(f"{label_var(var)} ({unit})" if unit else label_var(var))
-    if saz:
+    if saz and x == "Mês":
         ax.set_xticks(range(1, 13)); ax.set_xticklabels([mes_labels()[m] for m in range(1, 13)])
+    elif saz and x == "Trimestre_Num":
+        ax.set_xticks([1, 2, 3, 4]); ax.set_xticklabels(["T1", "T2", "T3", "T4"])
+    elif not saz:
+        format_time_axis(ax)
     ax.grid(True, linestyle="--", alpha=.3)
+    fig.subplots_adjust(bottom=0.22)
     showfig(fig)
 
 
 def line_counties_multi(df, var, saz=False):
-    key = "Mês" if saz else "Data"
+    key, xlabel = temporal_key_for_plot(df, var, saz=saz)
+    if key not in df.columns:
+        st.info("Não existe dimensão temporal adequada para esta variável."); return
     t = agg(df, [key, "Concelho"], var)
+    if t.empty:
+        st.info("Sem dados para os filtros selecionados."); return
     t["Valor"], unit = scale_var(t[var], var)
 
     concelhos = sorted(t["Concelho"].dropna().unique())
@@ -479,19 +909,24 @@ def line_counties_multi(df, var, saz=False):
         ax=ax
     )
 
-    ax.set_title(("Sazonalidade média" if saz else "Evolução temporal") + f" por concelho — {label_var(var)}", fontsize=11)
-    ax.set_xlabel("Mês" if saz else "Data")
+    titulo = "Sazonalidade média" if saz else ("Evolução trimestral" if xlabel == "Trimestre" else "Evolução temporal")
+    ax.set_title(titulo + f" por concelho — {label_var(var)}", fontsize=11)
+    ax.set_xlabel(xlabel)
     ax.set_ylabel(f"{label_var(var)} ({unit})" if unit else label_var(var))
 
-    if saz:
+    if saz and key == "Mês":
         ax.set_xticks(range(1, 13))
         ax.set_xticklabels([mes_labels()[m] for m in range(1, 13)])
+    elif saz and key == "Trimestre_Num":
+        ax.set_xticks([1, 2, 3, 4])
+        ax.set_xticklabels(["T1", "T2", "T3", "T4"])
+    elif not saz:
+        format_time_axis(ax)
 
     ax.grid(True, linestyle="--", alpha=.3)
     ax.legend(title="Concelho", bbox_to_anchor=(1.02, 1), loc="upper left", fontsize=7, borderaxespad=0)
-    fig.subplots_adjust(right=0.76)
+    fig.subplots_adjust(right=0.76, bottom=0.22)
     showfig(fig)
-
 
 
 def bars_counties(df, var, title_extra=""):
@@ -536,14 +971,14 @@ def map_districts(df, gdf, var, title, scale_df=None, figsize=(5, 5.8)):
     fig, ax = plt.subplots(figsize=figsize)
     mp.plot(column="Valor", cmap=MAP_CM.get(var, "viridis"), vmin=vmin, vmax=vmax,
             linewidth=.7, edgecolor="black", legend=True,
-            legend_kwds={"label": f"{label_var(var)} ({unit})" if unit else label_var(var)},
+            legend_kwds={"label": display_label(var, unit)},
             missing_kwds={"color": "lightgrey"}, ax=ax)
     add_labels(ax, mp, "distrito", fs=4.6)
     ax.set_title(title, fontsize=10.5); ax.axis("off")
     showfig(fig)
 
 
-def map_counties(df, gdf, var, title, distrito=None, labels=False, scale_df=None, figsize=(5, 5.8)):
+def map_counties(df, gdf, var, title, distrito=None, labels=False, scale_df=None, figsize=(5, 5.8), district_context=False):
     mp, unit, vmin, vmax = prepare_map_counties(df, gdf, var, scale_df)
     if distrito and distrito != "Portugal Continental":
         mp = mp[mp["Distrito_norm"] == norm_name(distrito)].copy()
@@ -551,10 +986,19 @@ def map_counties(df, gdf, var, title, distrito=None, labels=False, scale_df=None
     mp.plot(column="Valor", cmap=MAP_CM.get(var, "viridis"), vmin=vmin, vmax=vmax,
             linewidth=.25 if not distrito or distrito == "Portugal Continental" else .7,
             edgecolor="gray" if not distrito or distrito == "Portugal Continental" else "black",
-            legend=True, legend_kwds={"label": f"{label_var(var)} ({unit})" if unit else label_var(var)},
+            legend=True, legend_kwds={"label": display_label(var, unit)},
             missing_kwds={"color": "lightgrey"}, ax=ax)
+    # Nos mapas nacionais por concelho, acrescenta o contorno e o nome dos distritos
+    # para orientar a leitura sem criar um segundo mapa pesado.
+    if district_context and distrito == "Portugal Continental" and "gdf_distritos" in globals() and gdf_distritos is not None:
+        try:
+            gd_ctx = gdf_distritos.to_crs(mp.crs) if gdf_distritos.crs != mp.crs else gdf_distritos
+            gd_ctx.boundary.plot(ax=ax, color="#111111", linewidth=.55, zorder=5)
+            add_labels(ax, gd_ctx, "distrito", fs=4.2)
+        except Exception:
+            pass
     if labels and distrito and distrito != "Portugal Continental":
-        add_labels(ax, mp, "municipio", fs=5.6)
+        add_labels(ax, mp, "municipio", fs=4.6)
     ax.set_title(title, fontsize=10.5); ax.axis("off")
     showfig(fig)
 
@@ -581,7 +1025,7 @@ def map_pc_outliers(df_full, gdf, distrito, scale_df, title, labels=True, figsiz
             handles.append(mpatches.Patch(facecolor="tab:blue", edgecolor="black", label=f"Outlier: {r['municipio']} ({r['Valor']:.2f} {unit})"))
         ax.legend(handles=handles, loc="lower left", frameon=True, title="Valor fora da escala", fontsize=7, title_fontsize=8)
     if labels:
-        add_labels(ax, mp, "municipio", fs=5.6)
+        add_labels(ax, mp, "municipio", fs=4.6)
     ax.set_title(title, fontsize=10.5); ax.axis("off")
     showfig(fig)
 
@@ -589,25 +1033,98 @@ def map_pc_outliers(df_full, gdf, distrito, scale_df, title, labels=True, figsiz
 # CLUSTER MAPS
 # ============================================================
 
-def cluster_interactive(gdf_wgs, cl):
+def cluster_pydeck_map(gdf_wgs, cl):
+    """Mapa interativo leve com PyDeck/GeoJsonLayer e geometrias simplificadas."""
     try:
-        import folium
-        from streamlit_folium import st_folium
+        import pydeck as pdk
     except Exception:
-        st.warning("Para mapa interativo: python -m pip install folium streamlit-folium")
+        st.warning("Para o mapa interativo leve, adiciona `pydeck` ao requirements.txt. A mostrar mapa estático.")
+        cluster_static(gdf_concelhos, cl)
         return
-    mp = gdf_wgs.merge(cl[["Distrito_norm", "Concelho_norm", "Cluster", "Nome_Cluster", "Distrito", "Concelho"]], on=["Distrito_norm", "Concelho_norm"], how="inner")
+    mp = gdf_wgs.merge(
+        cl[["Distrito_norm", "Concelho_norm", "Cluster", "Nome_Cluster", "Distrito", "Concelho"]],
+        on=["Distrito_norm", "Concelho_norm"],
+        how="inner",
+        suffixes=("", "_cluster")
+    )
     if mp.empty:
         st.info("Sem concelhos para os filtros selecionados."); return
-    m = folium.Map(location=[39.6, -8.0], zoom_start=6.4, tiles="cartodbpositron")
-    def style(f):
-        c = f["properties"].get("Cluster")
-        return {"fillColor": CLUSTER_CORES.get(int(c), "#eee") if pd.notna(c) else "#eee", "color": "white", "weight": .6, "fillOpacity": .82}
-    folium.GeoJson(mp, style_function=style, tooltip=folium.GeoJsonTooltip(
-        fields=["Concelho", "Distrito", "Cluster", "Nome_Cluster"],
-        aliases=["Concelho:", "Distrito:", "Cluster:", "Tipo:"]
-    )).add_to(m)
-    st_folium(m, height=500, use_container_width=True)
+    mp = mp.to_crs(epsg=4326).copy()
+    # simplificação em graus: reduz bastante o peso do GeoJSON mantendo a leitura municipal
+    mp["geometry"] = mp.geometry.simplify(0.004, preserve_topology=True)
+
+    def hex_to_rgba(h, alpha=170):
+        h = h.lstrip("#")
+        return [int(h[i:i+2], 16) for i in (0, 2, 4)] + [alpha]
+    mp["fill_color"] = mp["Cluster"].astype(int).map(lambda k: hex_to_rgba(CLUSTER_CORES.get(k, "#cccccc")))
+    geojson = json.loads(mp.to_json())
+    layer = pdk.Layer(
+        "GeoJsonLayer",
+        geojson,
+        pickable=True,
+        stroked=True,
+        filled=True,
+        get_fill_color="properties.fill_color",
+        get_line_color=[255, 255, 255, 190],
+        line_width_min_pixels=1,
+    )
+    view_state = pdk.ViewState(latitude=39.65, longitude=-8.0, zoom=6.0)
+    deck = pdk.Deck(
+        layers=[layer],
+        initial_view_state=view_state,
+        map_style=None,
+        tooltip={
+            "html": "<b>{Concelho}</b><br/>{Distrito}<br/>Cluster {Cluster}: {Nome_Cluster}",
+            "style": {"backgroundColor": "#180d27", "color": "white"}
+        }
+    )
+    st.pydeck_chart(deck, use_container_width=True, height=560)
+
+
+def cluster_hover_map(gdf_wgs, cl):
+    """Mapa leve com hover usando Plotly, substituindo o Folium pesado."""
+    if not HAS_PLOTLY:
+        st.warning("Para o mapa com hover, adiciona `plotly` ao requirements.txt. A mostrar mapa estático como alternativa.")
+        cluster_static(gdf_concelhos, cl)
+        return
+    mp = gdf_wgs.merge(
+        cl[["Distrito_norm", "Concelho_norm", "Cluster", "Nome_Cluster", "Distrito", "Concelho"]],
+        on=["Distrito_norm", "Concelho_norm"],
+        how="inner"
+    )
+    if mp.empty:
+        st.info("Sem concelhos para os filtros selecionados."); return
+    mp = mp.copy().reset_index(drop=True)
+    mp["feature_id"] = mp.index.astype(str)
+    mp["Cluster_txt"] = mp["Cluster"].astype(int).astype(str) + " — " + mp["Nome_Cluster"].astype(str)
+    geojson = json.loads(mp.to_json())
+    color_map = {f"{k} — {CLUSTER_LABELS[k]}": v for k, v in CLUSTER_CORES.items()}
+    fig = px.choropleth(
+        mp,
+        geojson=geojson,
+        locations="feature_id",
+        featureidkey="properties.feature_id",
+        color="Cluster_txt",
+        color_discrete_map=color_map,
+        hover_name="Concelho",
+        hover_data={"Distrito": True, "Cluster": True, "Nome_Cluster": True, "feature_id": False, "Cluster_txt": False},
+        projection="mercator"
+    )
+    fig.update_geos(fitbounds="locations", visible=False)
+    fig.update_layout(
+        height=560,
+        margin={"r": 0, "t": 20, "l": 0, "b": 0},
+        paper_bgcolor="#0d0617",
+        plot_bgcolor="#0d0617",
+        legend_title_text="Cluster",
+        font=dict(color="#f4ecff")
+    )
+    st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+
+
+def cluster_interactive(gdf_wgs, cl):
+    # Mantido como alias para compatibilidade, mas agora usa Plotly em vez de Folium.
+    cluster_hover_map(gdf_wgs, cl)
 
 
 def cluster_static(gdf, cl):
@@ -620,6 +1137,61 @@ def cluster_static(gdf, cl):
     ax.set_title("Mapa de clusters energéticos", fontsize=10.5); ax.axis("off")
     showfig(fig)
 
+
+def cluster_indicator_explorer(df_main, cl):
+    """Interação leve: escolhe indicador e cluster para gerar ranking de concelhos."""
+    if cl.empty:
+        return
+    st.subheader("Ranking interativo por cluster")
+    st.caption("Seleciona um indicador e um cluster para ordenar os concelhos filtrados.")
+
+    profile_vars = [
+        "Consumo_per_capita",
+        "Energia_BT_per_capita",
+        "Energia_MAT_per_capita",
+        "CPEs_por_1000_hab",
+        "UPACs_por_1000_hab",
+        "Densidade_Populacional"
+    ]
+    profile_vars = [v for v in profile_vars if v in df_main.columns]
+    if not profile_vars:
+        st.info("Não existem variáveis de perfil disponíveis para esta exploração.")
+        return
+
+    a, b, c = st.columns([1.15, 1.25, .85])
+    with a:
+        indicador = st.selectbox("Indicador", profile_vars, format_func=label_var, key="cluster_indicator_select")
+    with b:
+        cluster_focus = st.selectbox(
+            "Cluster",
+            sorted([int(x) for x in cl["Cluster"].dropna().unique()]),
+            format_func=lambda k: f"{k} — {CLUSTER_LABELS.get(int(k), 'Cluster')}",
+            key="cluster_focus_select"
+        )
+    with c:
+        ordem = st.radio("Ordem", ["Descendente", "Ascendente"], horizontal=False, key="cluster_rank_order")
+
+    dc = df_main.merge(
+        cl[["Distrito_norm", "Concelho_norm", "Cluster", "Nome_Cluster", "Distrito", "Concelho"]],
+        on=["Distrito_norm", "Concelho_norm"],
+        how="inner",
+        suffixes=("", "_cluster")
+    )
+    if "Distrito" not in dc.columns and "Distrito_cluster" in dc.columns:
+        dc["Distrito"] = dc["Distrito_cluster"]
+    if "Concelho" not in dc.columns and "Concelho_cluster" in dc.columns:
+        dc["Concelho"] = dc["Concelho_cluster"]
+    if dc.empty:
+        st.info("Sem dados para os filtros selecionados.")
+        return
+
+    by_county = dc[dc["Cluster"] == cluster_focus].groupby(["Distrito", "Concelho"], as_index=False)[indicador].mean()
+    by_county["Valor"], unit = scale_var(by_county[indicador], indicador)
+    by_county = by_county.sort_values("Valor", ascending=(ordem == "Ascendente"))
+    titulo = f"Concelhos do cluster {cluster_focus} por {display_label(indicador, unit)}"
+    st.markdown(f"**{titulo}**")
+    st.dataframe(by_county[["Distrito", "Concelho", "Valor"]].round(3), use_container_width=True, height=360)
+
 # ============================================================
 # LOAD
 # ============================================================
@@ -629,6 +1201,8 @@ clusters = load_clusters(CLUSTERS_CSV, CLUSTERS_XLSX)
 gdf_distritos, gdf_concelhos, gdf_concelhos_wgs = load_geo(CAOP)
 if df is None:
     st.error("Não encontrei data/dataset_final.csv. Coloca o ficheiro na pasta data/."); st.stop()
+
+upacs_df = load_upacs(UPACS_FILE, df)
 
 # ============================================================
 # NAV
@@ -715,12 +1289,13 @@ if sec == "0. Introdução":
 
             Permite:
             - consultar os perfis de cluster;
-            - filtrar por distrito e concelho;
-            - observar mapas de clusters;
+            - filtrar por cluster, distrito e concelho;
+            - observar mapas de clusters, incluindo mapa interativo leve com tooltip;
             - consultar a tabela dos concelhos;
+            - usar o ranking interativo por cluster para ordenar concelhos por indicador;
             - comparar perfis médios por cluster.
 
-            Serve para transformar concelhos em perfis operacionais.
+            Serve para transformar concelhos em perfis operacionais e apoiar decisões por tipo de território.
             """
         )
 
@@ -742,7 +1317,7 @@ if sec == "0. Introdução":
         - **Comparação entre concelhos**: permite comparar concelhos de vários distritos e visualizar Portugal dividido por concelhos;
         - **Detalhe/Singular**: exige a escolha de um único distrito e permite analisar os seus concelhos em mais detalhe, incluindo evolução temporal e sazonalidade.
 
-        Em todas as áreas, as variáveis estão organizadas por secções: absolutas, relativas, climáticas e qualidade de serviço.
+        Em todas as áreas, as variáveis estão organizadas por secções: absolutas, relativas, proporções, climáticas e qualidade de serviço.
         """
     )
 
@@ -759,7 +1334,8 @@ if sec == "0. Introdução":
         - observar a penetração de UPACs;
         - comparar consumo absoluto e relativo;
         - apoiar decisões de planeamento e reforço da rede;
-        - segmentar estratégias por cluster energético.
+        - segmentar estratégias por cluster energético;
+        - explorar rankings de concelhos dentro de cada cluster.
         """
     )
 
@@ -771,13 +1347,87 @@ elif sec == "1. Visualização Exploratória":
     c1, c2, c3 = st.columns([1.25, 1.05, 1.2])
     with c1:
         var = choose_var(df, "expl")
-    with c2:
-        anos = choose_years(df, "expl_anos")
-    with c3:
-        level = st.radio("Granularidade", ["Nível distrito", "Nível concelho"], horizontal=True)
 
-    dbase = df[df["Ano"].isin(anos)].copy() if anos else df.copy()
+    df_var, using_upacs_file = data_for_var(var, df, upacs_df)
+    if is_upac_var(var) and not using_upacs_file:
+        st.warning("Não encontrei `data/upacs_tratado.xlsx` ou a variável não existe nesse ficheiro. A app está a usar o dataset unificado como fallback.")
+
+    with c2:
+        anos = choose_years(df_var, "expl_anos", var=var)
+    with c3:
+        if is_climate_var(var):
+            level = st.radio("Tipo de comparação", ["Consumo do distrito vs clima", "Consumo de concelho vs clima"], horizontal=True)
+        else:
+            level = st.radio("Granularidade", ["Nível distrito", "Nível concelho"], horizontal=True)
+
+    dbase = df_var[df_var["Ano"].isin(anos)].copy() if anos else df_var.iloc[0:0].copy()
     st.divider()
+
+    if dbase.empty:
+        st.info("Seleciona pelo menos um ano para gerar as visualizações.")
+        st.stop()
+
+    if is_climate_var(var):
+        if level == "Consumo do distrito vs clima":
+            st.subheader("Comparação entre consumo distrital e variável climática")
+            a, b, c = st.columns([1.2, 1.05, 1.3])
+            with a:
+                dists = st.multiselect(
+                    "Distritos",
+                    sorted(dbase["Distrito"].dropna().unique()),
+                    default=default_districts(sorted(dbase["Distrito"].dropna().unique())),
+                    key="clima_districts"
+                )
+            dd = dbase[dbase["Distrito"].isin(dists)].copy() if dists else dbase.iloc[0:0].copy()
+            with b:
+                viz = st.selectbox(
+                    "Visualização",
+                    ["Evolução consumo vs clima", "Sazonalidade consumo vs clima", "Ranking de sensibilidade dos distritos"],
+                    key="clima_district_viz"
+                )
+            with c:
+                dist_plot = st.selectbox("Distrito do gráfico", sorted(dd["Distrito"].dropna().unique()), key="clima_dist_plot") if not dd.empty and viz != "Ranking de sensibilidade dos distritos" else None
+            if dd.empty:
+                empty_selection_message("distrito")
+            elif viz == "Ranking de sensibilidade dos distritos":
+                climate_sensitivity_ranking(dd, var, level="Distrito")
+            else:
+                climate_vs_consumption_district(dd, var, dist_plot, saz=(viz == "Sazonalidade consumo vs clima"))
+        else:
+            st.subheader("Comparação entre consumo municipal e variável climática distrital")
+            a, b = st.columns([1.15, 1.25])
+            with a:
+                dists = st.multiselect(
+                    "Distritos",
+                    sorted(dbase["Distrito"].dropna().unique()),
+                    default=default_districts(sorted(dbase["Distrito"].dropna().unique())),
+                    key="clima_conc_dists"
+                )
+            dd = dbase[dbase["Distrito"].isin(dists)].copy() if dists else dbase.iloc[0:0].copy()
+            with b:
+                viz = st.selectbox(
+                    "Visualização",
+                    ["Evolução consumo vs clima", "Sazonalidade consumo vs clima", "Ranking de sensibilidade dos concelhos"],
+                    key="clima_conc_viz"
+                )
+
+            if dd.empty:
+                empty_selection_message("distrito/concelho")
+            elif viz == "Ranking de sensibilidade dos concelhos":
+                concs = st.multiselect(
+                    "Concelhos incluídos no ranking",
+                    sorted(dd["Concelho"].dropna().unique()),
+                    default=[],
+                    help="Se não escolheres nenhum, entram todos os concelhos dos distritos selecionados.",
+                    key="clima_conc_list"
+                )
+                if concs:
+                    dd = dd[dd["Concelho"].isin(concs)].copy()
+                climate_sensitivity_ranking(dd, var, level="Concelho")
+            else:
+                conc_plot = st.selectbox("Concelho do gráfico", sorted(dd["Concelho"].dropna().unique()), key="clima_conc_plot")
+                climate_vs_consumption_single_county(dd, var, conc_plot, saz=(viz == "Sazonalidade consumo vs clima"))
+        st.stop()
 
     if level == "Nível distrito":
         st.subheader("Análise ao nível do distrito")
@@ -788,11 +1438,14 @@ elif sec == "1. Visualização Exploratória":
             dists = st.multiselect(
                 "Distritos",
                 sorted(dbase["Distrito"].dropna().unique()),
-                default=sorted(dbase["Distrito"].dropna().unique()),
+                default=default_districts(sorted(dbase["Distrito"].dropna().unique())),
                 key="expl_dist_level_dists"
             )
 
-        dtmp = dbase[dbase["Distrito"].isin(dists)].copy() if dists else dbase.copy()
+        if not dists:
+            dtmp = dbase.iloc[0:0].copy()
+        else:
+            dtmp = dbase[dbase["Distrito"].isin(dists)].copy()
 
         with b:
             concs = st.multiselect(
@@ -807,13 +1460,23 @@ elif sec == "1. Visualização Exploratória":
             dtmp = dtmp[dtmp["Concelho"].isin(concs)].copy()
 
         with c:
+            viz_options = ["Evolução temporal", "Sazonalidade", "Ranking distrital", "Mapa por distrito", "Tabela agregada"]
+            if is_climate_var(var):
+                viz_options = ["Evolução consumo vs clima", "Sazonalidade consumo vs clima"]
+            elif is_quality_var(var):
+                viz_options = ["Ranking distrital", "Mapa por distrito", "Tabela agregada"]
             viz = st.selectbox(
                 "Visualização",
-                ["Evolução temporal", "Sazonalidade", "Ranking distrital", "Mapa por distrito", "Tabela agregada"],
+                viz_options,
                 key="expl_dist_viz"
             )
 
-        if viz == "Evolução temporal":
+        if dtmp.empty:
+            empty_selection_message("distrito")
+        elif viz in ["Evolução consumo vs clima", "Sazonalidade consumo vs clima"]:
+            dist_plot = st.selectbox("Distrito do gráfico", sorted(dtmp["Distrito"].dropna().unique()), key="expl_climate_dist_plot")
+            climate_vs_consumption_district(dtmp, var, dist_plot, saz=(viz == "Sazonalidade consumo vs clima"))
+        elif viz == "Evolução temporal":
             line_district(dtmp, var, False)
         elif viz == "Sazonalidade":
             line_district(dtmp, var, True)
@@ -844,11 +1507,14 @@ elif sec == "1. Visualização Exploratória":
                 dists = st.multiselect(
                     "Distritos",
                     sorted(dbase["Distrito"].dropna().unique()),
-                    default=sorted(dbase["Distrito"].dropna().unique()),
+                    default=default_districts(sorted(dbase["Distrito"].dropna().unique())),
                     key="expl_conc_comp_dists"
                 )
 
-            dd = dbase[dbase["Distrito"].isin(dists)].copy() if dists else dbase.copy()
+            if not dists:
+                dd = dbase.iloc[0:0].copy()
+            else:
+                dd = dbase[dbase["Distrito"].isin(dists)].copy()
 
             with b:
                 concs = st.multiselect(
@@ -863,13 +1529,21 @@ elif sec == "1. Visualização Exploratória":
                 dd = dd[dd["Concelho"].isin(concs)].copy()
 
             with c:
+                viz_options = ["Mapa por concelho", "Barras por concelho", "Tabela"]
+                if is_climate_var(var):
+                    viz_options = ["Evolução consumo vs clima", "Sazonalidade consumo vs clima", "Tabela"]
                 viz = st.selectbox(
                     "Visualização",
-                    ["Mapa por concelho", "Barras por concelho", "Tabela"],
+                    viz_options,
                     key="expl_conc_comp_viz"
                 )
 
-            if viz == "Mapa por concelho":
+            if dd.empty:
+                empty_selection_message("distrito")
+            elif viz in ["Evolução consumo vs clima", "Sazonalidade consumo vs clima"]:
+                conc_plot = st.selectbox("Concelho do gráfico", sorted(dd["Concelho"].dropna().unique()), key="expl_climate_conc_comp_plot")
+                climate_vs_consumption_single_county(dd, var, conc_plot, saz=(viz == "Sazonalidade consumo vs clima"))
+            elif viz == "Mapa por concelho":
                 if gdf_concelhos is None:
                     st.warning("Falta o ficheiro CAOP GeoPackage.")
                 else:
@@ -881,7 +1555,8 @@ elif sec == "1. Visualização Exploratória":
                         f"{label_var(var)} — Portugal por concelhos",
                         distrito="Portugal Continental",
                         labels=False,
-                        figsize=(5.2, 6.0)
+                        figsize=(5.2, 6.0),
+                        district_context=True
                     )
             elif viz == "Barras por concelho":
                 bars_counties(dd, var, "— concelhos selecionados")
@@ -913,13 +1588,20 @@ elif sec == "1. Visualização Exploratória":
                 dd = dd[dd["Concelho"].isin(concs_detail)].copy()
 
             with c:
+                viz_options = ["Mapa do distrito", "Barras por concelho", "Evolução temporal dos concelhos", "Sazonalidade dos concelhos", "Tabela"]
+                if is_climate_var(var):
+                    viz_options = ["Evolução consumo vs clima dos concelhos", "Sazonalidade consumo vs clima dos concelhos", "Tabela"]
+                elif is_quality_var(var):
+                    viz_options = ["Mapa do distrito", "Barras por concelho", "Tabela"]
                 viz = st.selectbox(
                     "Visualização",
-                    ["Mapa do distrito", "Barras por concelho", "Evolução temporal dos concelhos", "Sazonalidade dos concelhos", "Tabela"],
+                    viz_options,
                     key="expl_conc_detail_viz"
                 )
 
-            if viz == "Mapa do distrito":
+            if viz in ["Evolução consumo vs clima dos concelhos", "Sazonalidade consumo vs clima dos concelhos"]:
+                climate_vs_consumption_counties(dd, var, dist, saz=(viz == "Sazonalidade consumo vs clima dos concelhos"))
+            elif viz == "Mapa do distrito":
                 if gdf_concelhos is None:
                     st.warning("Falta o ficheiro CAOP GeoPackage.")
                 else:
@@ -981,8 +1663,13 @@ elif sec == "2. Os 4 Distritos Estudados":
             DISTRITOS_ESTUDADOS
         )
 
-    de = df[df["Distrito"].isin(DISTRITOS_ESTUDADOS)].copy()
-
+    df_sec2, using_upacs_sec2 = data_for_var(var, df, upacs_df)
+    de = df_sec2[df_sec2["Distrito"].isin(DISTRITOS_ESTUDADOS)].copy()
+    if var == "Consumo_per_capita":
+        st.info(
+            "Nesta versão, os outliers não são isolados: o mapa mostra a escala original completa, "
+            "tal como nas restantes variáveis."
+        )
 
     if gdf_distritos is None or gdf_concelhos is None:
         st.warning("Falta o ficheiro CAOP GeoPackage.")
@@ -1351,41 +2038,85 @@ else:
     st.header("3. Clustering Energético")
     if clusters is None:
         st.warning("Não encontrei concelhos_clusters_portugal.csv/.xlsx na pasta data/."); st.stop()
-    a, b = st.columns(2)
-    with a:
-        dists = st.multiselect("Filtrar distrito", sorted(clusters["Distrito"].dropna().unique()), default=sorted(clusters["Distrito"].dropna().unique()))
-    cl = clusters[clusters["Distrito"].isin(dists)].copy() if dists else clusters.copy()
-    with b:
-        concs = st.multiselect("Filtrar concelho", sorted(cl["Concelho"].dropna().unique()), default=[])
-    if concs: cl = cl[cl["Concelho"].isin(concs)].copy()
-    counts = cl.groupby("Cluster").size().to_dict()
+
+    f1, f2, f3 = st.columns([1.05, 1.2, 1.35])
+    with f1:
+        cluster_opts = sorted([int(x) for x in clusters["Cluster"].dropna().unique()])
+        sel_clusters = st.multiselect(
+            "Filtrar cluster",
+            cluster_opts,
+            default=cluster_opts,
+            format_func=lambda k: f"{k} — {CLUSTER_LABELS.get(int(k), 'Cluster')}",
+            key="cluster_filter_cluster"
+        )
+
+    cl = clusters[clusters["Cluster"].astype("Int64").isin(sel_clusters)].copy() if sel_clusters else clusters.iloc[0:0].copy()
+
+    with f2:
+        dist_opts = sorted(clusters["Distrito"].dropna().unique())
+        dists = st.multiselect(
+            "Filtrar distrito",
+            dist_opts,
+            default=default_districts(dist_opts),
+            key="cluster_filter_district"
+        )
+
+    if dists:
+        cl = cl[cl["Distrito"].isin(dists)].copy()
+    else:
+        cl = cl.iloc[0:0].copy()
+
+    with f3:
+        concs = st.multiselect("Filtrar concelho", sorted(cl["Concelho"].dropna().unique()), default=[], key="cluster_filter_county")
+    if concs:
+        cl = cl[cl["Concelho"].isin(concs)].copy()
+
+    counts = cl.groupby("Cluster").size().to_dict() if not cl.empty else {}
     st.subheader("Legenda dos clusters")
     cols = st.columns(5)
     for i, k in enumerate(sorted(CLUSTER_LABELS)):
         with cols[i]:
             st.markdown(f"""
-            <div style='border:1px solid #ddd; border-radius:8px; padding:9px; min-height:125px;'>
-            <div style='background:{CLUSTER_CORES[k]}; color:white; width:34px; height:34px; display:flex; align-items:center; justify-content:center; border-radius:4px; font-weight:bold;'>{k}</div>
-            <b>{CLUSTER_LABELS[k]}</b><br><small>{counts.get(k,0)} concelhos selecionados</small><br>
-            <span style='font-size:12px; color:#555;'>{CLUSTER_DESCRICOES[k]}</span></div>
+            <div style='border:1px solid #3d2360; border-radius:10px; padding:10px; height:285px; overflow-y:auto; background:#180d27; box-sizing:border-box;'>
+            <div style='background:{CLUSTER_CORES[k]}; color:white; width:34px; height:34px; display:flex; align-items:center; justify-content:center; border-radius:5px; font-weight:bold; margin-bottom:6px;'>{k}</div>
+            <b style='color:#ffffff;'>{CLUSTER_LABELS[k]}</b><br>
+            <small style='color:#d8c8f2;'>{counts.get(k,0)} concelhos selecionados</small><br><br>
+            <span style='font-size:12px; color:#f4ecff;'>{CLUSTER_DESCRICOES[k]}</span><br><br>
+            <span style='font-size:11.5px; color:#d8c8f2;'><b>Variáveis determinantes:</b><br>{CLUSTER_DETERMINANTES[k]}</span>
+            </div>
             """, unsafe_allow_html=True)
+
     st.divider()
-    c1, c2 = st.columns([1.35, 1])
-    with c1:
-        st.subheader("Mapa de clusters")
-        mt = st.radio("Tipo de mapa", ["Estático", "Interativo"], horizontal=True)
-        if gdf_concelhos is None: st.warning("Falta o ficheiro CAOP GeoPackage.")
-        elif mt == "Interativo" and gdf_concelhos_wgs is not None: cluster_interactive(gdf_concelhos_wgs, cl)
-        else: cluster_static(gdf_concelhos, cl)
-    with c2:
-        st.subheader("Tabela")
-        st.dataframe(cl[["Distrito", "Concelho", "Codigo_Concelho", "Cluster", "Nome_Cluster"]].sort_values(["Cluster", "Distrito", "Concelho"]), use_container_width=True, height=430)
-    st.subheader("Perfil médio por cluster")
-    dc = df.merge(cl[["Distrito_norm", "Concelho_norm", "Cluster", "Nome_Cluster"]], on=["Distrito_norm", "Concelho_norm"], how="inner")
-    pv = [v for v in ["Consumo_per_capita", "Energia_BT_per_capita", "Energia_MAT_per_capita", "CPEs_por_1000_hab", "UPACs_por_1000_hab", "Densidade_Populacional"] if v in dc.columns]
-    if pv:
-        prof = dc.groupby(["Cluster", "Nome_Cluster"], as_index=False)[pv].mean().round(2)
-        st.dataframe(prof, use_container_width=True)
+    if cl.empty:
+        st.info("Seleciona pelo menos um cluster e um distrito para gerar o mapa e a tabela.")
+    else:
+        c1, c2 = st.columns([1.35, 1])
+        with c1:
+            st.subheader("Mapa de clusters")
+            mt = st.radio("Tipo de mapa", ["Interativo leve", "Estático"], horizontal=True, key="cluster_map_type")
+            if gdf_concelhos is None:
+                st.warning("Falta o ficheiro CAOP GeoPackage.")
+            elif mt == "Interativo leve" and gdf_concelhos_wgs is not None:
+                cluster_pydeck_map(gdf_concelhos_wgs, cl)
+            else:
+                cluster_static(gdf_concelhos, cl)
+        with c2:
+            st.subheader("Tabela")
+            st.dataframe(
+                cl[["Distrito", "Concelho", "Codigo_Concelho", "Cluster", "Nome_Cluster"]].sort_values(["Cluster", "Distrito", "Concelho"]),
+                use_container_width=True,
+                height=430
+            )
+
+        st.divider()
+        cluster_indicator_explorer(df, cl)
+
+        st.subheader("Perfil médio por cluster")
+        dc = df.merge(cl[["Distrito_norm", "Concelho_norm", "Cluster", "Nome_Cluster"]], on=["Distrito_norm", "Concelho_norm"], how="inner")
+        pv = [v for v in ["Consumo_per_capita", "Energia_BT_per_capita", "Energia_MAT_per_capita", "CPEs_por_1000_hab", "UPACs_por_1000_hab", "Densidade_Populacional"] if v in dc.columns]
+        if pv:
+            prof = dc.groupby(["Cluster", "Nome_Cluster"], as_index=False)[pv].mean().round(2)
+            st.dataframe(prof, use_container_width=True)
 
 st.divider()
 st.caption("Protótipo académico — Deployment CRISP-DM | Caracterização energética municipal em Portugal")
