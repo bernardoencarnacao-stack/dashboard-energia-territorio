@@ -1976,7 +1976,8 @@ elif sec == "2. Os 4 Distritos Estudados":
                 "narrativa": """
                 **Vila Velha de Ródão** volta a destacar-se, seguido por **Proença-a-Nova, Oleiros, Sertã e Penamacor**.
                 Em territórios rurais, poucos projetos podem pesar muito por habitante; em Vila Velha de Ródão, a indústria
-                pode também incentivar soluções de autoconsumo.
+                pode também incentivar soluções de autoconsumo. A Navigator, por exemplo, anunciou em 2024 uma central solar de autoconsumo 
+                na fábrica de tissue com 4,13 MWp e cerca de 9.000 painéis solares.
                 """,
                 "solucoes": """
                 - Monitorizar integração de UPACs em concelhos de baixa densidade.
