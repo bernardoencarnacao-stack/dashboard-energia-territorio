@@ -42,6 +42,7 @@ A plataforma permite explorar dados de consumo elétrico, indicadores territoria
 
 ## Deployment
 A aplicação pode ser, e neste momento está, publicada através do **Streamlit Community Cloud**, e pode ser acessada através de: https://dashboard-energia-territorio-lwyfoaqbqyem5lnaugabis.streamlit.app/
+(poderá ser necessário dar reboot à app caso a mesma esteja "adormecida").
 
 ## Executar localmente
 
