@@ -40,6 +40,9 @@ A plataforma permite explorar dados de consumo elétrico, indicadores territoria
 * **concelhos_clusters_portugal.csv** – classificação dos clusters.
 * **Continente_CAOP2025.gpkg** – informação geográfica para os mapas.
 
+## Deployment
+A aplicação pode ser, e neste momento está, publicada através do **Streamlit Community Cloud**, e pode ser acessada através de: https://dashboard-energia-territorio-lwyfoaqbqyem5lnaugabis.streamlit.app/
+
 ## Executar localmente
 
 Instalar dependências:
@@ -59,9 +62,6 @@ A aplicação ficará disponível em:
 ```text
 http://localhost:8501
 ```
-
-## Deployment
-A aplicação pode ser, e neste momento está, publicada através do **Streamlit Community Cloud**.
 
 ## Nota
 
